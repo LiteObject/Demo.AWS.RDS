@@ -1,44 +1,23 @@
-﻿using Microsoft.EntityFrameworkCore;
-using MySql.Data.MySqlClient;
-
-namespace Demo.AWS.RDS
+﻿namespace Demo.AWS.RDS
 {
-    public class Program
+    using Microsoft.EntityFrameworkCore;
+    using MySql.Data.MySqlClient;
+
+    public static class Program
     {
         static async Task Main(string[] args)
         {
-            /* 
-             * ALTER USER 'testuser'@'%' REQUIRE SSL;
-             * 
-             * $ mysql -h delete-me-database-1.ceiy5yfgzyfi.us-east-1.rds.amazonaws.com
-             * -u admin -p 
-             * --ssl-ca=[full path]global-bundle.pem 
-             * --ssl-mode=VERIFY_IDENTITY 
-             */
+            await CheckDbConnWithAdoAsync();
 
-            /* COPY *.pem file to container's cert folder (create one if it doesn't exist, 
-             * $ mkdir /usr/local/share/cert, or use a different folder) 
-             * $ docker cp global-bundle.pem mysql-server:/usr/local/share/cert
-             * 
-             * $ pwd
-             * /usr/local/share/cert
-             * $ mysql -u admin -p -h delete-me-database-1.ceiy5yfgzyfi.us-east-1.rds.amazonaws.com --ssl-ca=global-bundle.pem --ssl-mode=VERIFY_IDENTITY             
-             */
+            Console.WriteLine("\nProgram ended. Press any key to exit.");
+            Console.Read();
+        }
 
-            var connectionuilder = new MySqlConnectionStringBuilder
-            {
-                Server = "delete-me-database-1.ceiy5yfgzyfi.us-east-1.rds.amazonaws.com",
-                Database = "sampledb",
-                Port = 3306,
-                UserID = "",
-                Password = "",
-                SslMode = MySqlSslMode.Required,
-                TlsVersion = "TLSv1.2",
-                SslCa = "global-bundle.pem"
-            };
-
+        private static async Task CheckDbConnWithDbContextAsync()
+        {
+            string connStr = GetConnectionString();
             var optionsBuilder = new DbContextOptionsBuilder<MyDbContext>();
-            optionsBuilder.UseMySql(connectionuilder.ConnectionString, ServerVersion.AutoDetect(connectionuilder.ConnectionString));
+            optionsBuilder.UseMySql(connStr, ServerVersion.AutoDetect(connStr));
             optionsBuilder.LogTo(Console.WriteLine);
             optionsBuilder.EnableSensitiveDataLogging(true);
             optionsBuilder.EnableDetailedErrors(true);
@@ -47,8 +26,79 @@ namespace Demo.AWS.RDS
             var can = await context.Database.CanConnectAsync();
             Console.WriteLine(">>> Can connect? " + can);
 
-            Console.WriteLine("\nPress any key to exit.");
-            Console.Read();
+            using (var command = context.Database.GetDbConnection().CreateCommand())
+            {
+                command.CommandText = "SHOW SESSION STATUS;";
+                await context.Database.OpenConnectionAsync();
+                using (var reader = await command.ExecuteReaderAsync())
+                {
+                    while (reader.Read() && reader.HasRows)
+                    {
+                        Console.WriteLine(reader.GetFieldValue<string>(0) + ": " + reader.GetFieldValue<string>(1));
+                    }
+                }
+            }
+        }
+
+        private static async Task CheckDbConnWithAdoAsync()
+        {
+            string connStr = GetConnectionString();
+            MySqlConnection conn = new(connStr);
+            Console.WriteLine(">>> Connection string: " + conn.ConnectionString);
+
+            try
+            {
+                Console.WriteLine(">>> Attempting to connect to database");
+
+                await conn.OpenAsync();
+
+                Console.WriteLine(">>> Connection to Database Successful");
+
+                using (MySqlCommand command = new("SHOW SESSION STATUS LIKE \'%ssl%\';", conn))
+                {
+                    using (var reader = await command.ExecuteReaderAsync())
+                    {
+                        while (reader.Read() && reader.HasRows)
+                        {
+                            Console.WriteLine(reader.GetFieldValue<string>(0) + ": " + reader.GetFieldValue<string>(1));
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine(ex.ToString(), ex);
+            }
+            finally
+            {
+                Console.WriteLine(">>> Attempting to close database connection");
+                await conn.CloseAsync();
+            }
+        }
+
+        private static string GetConnectionString()
+        {
+            /*
+             * The path to a CA certificate file in a PEM Encoded (.pem) format. This should be used with SslMode=VerifyCA or 
+             * SslMode=VerifyFull to enable verification of a CA certificate that is not trusted by the operating system’s certificate store.   
+             * 
+             * VerifyCA - Always use SSL. Validates the CA but tolerates hostname mismatch.
+             * VerifyFull - Always use SSL. Validates CA and hostname.
+             * Required - Always use SSL. Deny connection if server does not support SSL. Does not validate CA or hostname.
+             * Preferred - (this is the default). Use SSL if the server supports it.
+             * None - Do not use SSL.
+             */
+
+            return new MySqlConnectionStringBuilder
+            {
+                Server = "***.us-east-1.rds.amazonaws.com",
+                Database = "sampledb", // CREATE DATABASE sampledb;
+                Port = 3306,
+                UserID = "admin",
+                Password = "",
+                SslMode = MySqlSslMode.Required,
+                TlsVersion = "TLSv1.2"
+            }.ConnectionString;
         }
     }
 }

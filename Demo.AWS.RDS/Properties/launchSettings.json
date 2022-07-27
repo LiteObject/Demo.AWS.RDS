@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Demo.AWS.RDS": {
+      "commandName": "Project"
+    },
+    "Docker": {
+      "commandName": "Docker"
+    }
+  }
+}
